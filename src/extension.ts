@@ -5,6 +5,7 @@ import { getConfig } from './config';
 import { StatusBarManager } from './statusBar';
 import { SyncEngine } from './syncEngine';
 import { restoreConversations } from './restore';
+import { injectConversation } from './inject';
 import { GroupedTreeProvider } from './treeView';
 
 let statusBar: StatusBarManager;
@@ -36,6 +37,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('agRecover.restore', async () => {
       outputChannel.appendLine('[CMD] Restore');
       await restoreConversations(outputChannel);
+    }),
+
+    vscode.commands.registerCommand('agRecover.inject', async () => {
+      outputChannel.appendLine('[CMD] Inject');
+      await injectConversation(syncEngine.ls, outputChannel);
+      treeProvider.refresh();
     }),
 
     vscode.commands.registerCommand('agRecover.export', async (item?: any) => {

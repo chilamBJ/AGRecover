@@ -30,6 +30,8 @@ export class SyncEngine {
     this.lsClient = new LSClient((msg) => this.out.appendLine(msg));
   }
 
+  get ls(): LSClient { return this.lsClient; }
+
   async start() {
     const config = getConfig();
     if (!config.autoBackup) {

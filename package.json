@@ -13,7 +13,8 @@
   "contributes": {
     "commands": [
       { "command": "agRecover.forceSync", "title": "AG Recover: Force Sync Now", "icon": "$(sync)" },
-      { "command": "agRecover.restore", "title": "AG Recover: Restore Conversations" },
+      { "command": "agRecover.restore", "title": "AG Recover: Restore All (L1 批量恢复)" },
+      { "command": "agRecover.inject", "title": "AG Recover: Inject to AG History (选择性注入)" },
       { "command": "agRecover.export", "title": "AG Recover: Export Conversation to Markdown" },
       { "command": "agRecover.search", "title": "AG Recover: Search Conversations" },
       { "command": "agRecover.openBackupFolder", "title": "AG Recover: Open Backup Folder" },

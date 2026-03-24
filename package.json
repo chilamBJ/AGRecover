@@ -1,0 +1,65 @@
+{
+  "name": "ag-recover",
+  "displayName": "AG Recover",
+  "description": "Antigravity 聊天记录实时备份 & 一键恢复",
+  "version": "0.1.0",
+  "publisher": "ag-recover",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "agRecover.forceSync", "title": "AG Recover: Force Sync Now" },
+      { "command": "agRecover.restore", "title": "AG Recover: Restore Conversations" },
+      { "command": "agRecover.openBackupFolder", "title": "AG Recover: Open Backup Folder" },
+      { "command": "agRecover.showStatus", "title": "AG Recover: Show Sync Status" }
+    ],
+    "configuration": {
+      "title": "AG Recover",
+      "properties": {
+        "agRecover.backupDir": {
+          "type": "string",
+          "default": "",
+          "description": "备份根目录（留空使用默认 ~/.ag-recover）"
+        },
+        "agRecover.autoBackup": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用自动备份"
+        },
+        "agRecover.gitAutoCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "启用 git 自动 commit"
+        },
+        "agRecover.gitScope": {
+          "type": "array",
+          "default": ["conversations_md", "brain"],
+          "items": { "type": "string" },
+          "description": "git commit 涵盖的目录"
+        },
+        "agRecover.mdSyncIntervalSeconds": {
+          "type": "number",
+          "default": 300,
+          "description": "L2 MD 备份最小间隔（秒）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "sql.js": "^1.10.0"
+  }
+}

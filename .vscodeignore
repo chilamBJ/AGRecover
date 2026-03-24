@@ -1,0 +1,6 @@
+src/**
+.gitignore
+tsconfig.json
+.agents/**
+existing_plugins_analysis.md
+node_modules/**

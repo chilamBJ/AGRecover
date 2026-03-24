@@ -2,7 +2,7 @@
   "name": "ag-recover",
   "displayName": "AG Recover",
   "description": "Antigravity 聊天记录实时备份 & 一键恢复",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "ag-recover",
   "engines": {
     "vscode": "^1.85.0"
@@ -12,11 +12,41 @@
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      { "command": "agRecover.forceSync", "title": "AG Recover: Force Sync Now" },
+      { "command": "agRecover.forceSync", "title": "AG Recover: Force Sync Now", "icon": "$(sync)" },
       { "command": "agRecover.restore", "title": "AG Recover: Restore Conversations" },
+      { "command": "agRecover.export", "title": "AG Recover: Export Conversation to Markdown" },
+      { "command": "agRecover.search", "title": "AG Recover: Search Conversations" },
       { "command": "agRecover.openBackupFolder", "title": "AG Recover: Open Backup Folder" },
-      { "command": "agRecover.showStatus", "title": "AG Recover: Show Sync Status" }
+      { "command": "agRecover.showStatus", "title": "AG Recover: Show Sync Status" },
+      { "command": "agRecover.refreshTree", "title": "Refresh", "icon": "$(refresh)" }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agRecover",
+          "title": "AG Recover",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "views": {
+      "agRecover": [
+        {
+          "id": "agRecoverConversations",
+          "name": "Conversations",
+          "type": "tree"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "agRecover.refreshTree", "when": "view == agRecoverConversations", "group": "navigation" },
+        { "command": "agRecover.forceSync", "when": "view == agRecoverConversations", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "agRecover.export", "when": "view == agRecoverConversations && viewItem == conversationWithMd" }
+      ]
+    },
     "configuration": {
       "title": "AG Recover",
       "properties": {

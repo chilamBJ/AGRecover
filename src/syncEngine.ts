@@ -156,7 +156,7 @@ export class SyncEngine {
 
     try {
       // L1
-      fs.copyFileSync(pbPath, path.join(config.backupDir, 'conversations', `${cascadeId}.pb`));
+      this.verifiedCopy(pbPath, path.join(config.backupDir, 'conversations', `${cascadeId}.pb`));
       await backupStateKeys(
         getAGPaths().stateVscdb,
         path.join(config.backupDir, 'state', 'state_keys_backup.json')
@@ -252,8 +252,18 @@ export class SyncEngine {
       const s = path.join(src, f), d = path.join(dest, f);
       try {
         if (fs.existsSync(d) && fs.statSync(s).mtimeMs <= fs.statSync(d).mtimeMs) continue;
-        fs.copyFileSync(s, d);
+        this.verifiedCopy(s, d);
       } catch {}
+    }
+
+    // 检测源目录中被删除的文件（AG 删了但我们保留）
+    if (fs.existsSync(dest)) {
+      const srcFiles = new Set(fs.readdirSync(src).filter((f) => f.endsWith(ext)));
+      for (const f of fs.readdirSync(dest).filter((f) => f.endsWith(ext))) {
+        if (!srcFiles.has(f)) {
+          this.out.appendLine(`[WARN] AG deleted ${f} — backup retained`);
+        }
+      }
     }
   }
 
@@ -290,6 +300,17 @@ export class SyncEngine {
 
   private ensureDir(d: string) {
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  }
+
+  /** 复制文件并校验写入完整性 */
+  private verifiedCopy(src: string, dest: string) {
+    fs.copyFileSync(src, dest);
+    const srcSize = fs.statSync(src).size;
+    const destSize = fs.statSync(dest).size;
+    if (srcSize !== destSize) {
+      this.onL1Failure(`Write verification failed: ${path.basename(src)} (src=${srcSize} dest=${destSize})`);
+      throw new Error('Write verification failed');
+    }
   }
 
   private gitInit(dir: string) {

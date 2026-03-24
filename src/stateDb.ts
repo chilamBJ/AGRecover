@@ -98,15 +98,13 @@ export async function restoreStateKeys(
         if (mode === 'merge') {
           const existing = db.exec(`SELECT value FROM ItemTable WHERE key = '${key}'`);
           if (existing.length > 0 && existing[0].values.length > 0) {
-            // trajectorySummaries 特殊处理：合并缺失的对话
+            // trajectorySummaries 是 base64(protobuf)，不是 JSON
+            // protobuf 级合并由 offlineRecover / Guardian 处理
+            // 这里 merge 模式下跳过，避免破坏二进制数据
             if (key === 'antigravityUnifiedStateSync.trajectorySummaries') {
-              const existingVal = JSON.parse(existing[0].values[0][0] as string);
-              const backupVal = JSON.parse(value);
-              const merged = { ...backupVal, ...existingVal }; // 现有值优先
-              db.run(`UPDATE ItemTable SET value = ? WHERE key = ?`, [JSON.stringify(merged), key]);
-              result.restored++;
+              result.skipped++;
             } else {
-              result.skipped++; // 已存在则跳过
+              result.skipped++; // 其他已存在的 key 也跳过
             }
             continue;
           }

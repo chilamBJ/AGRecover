@@ -2,7 +2,7 @@
   "name": "ag-recover",
   "displayName": "AG Recover",
   "description": "Antigravity 聊天记录实时备份 & 一键恢复",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "ag-recover",
   "engines": {
     "vscode": "^1.85.0"
@@ -14,7 +14,7 @@
     "commands": [
       { "command": "agRecover.forceSync", "title": "AG Recover: Force Sync Now", "icon": "$(sync)" },
       { "command": "agRecover.restore", "title": "AG Recover: Restore All (L1 批量恢复)" },
-      { "command": "agRecover.inject", "title": "AG Recover: Inject to AG History (选择性注入)" },
+      { "command": "agRecover.prepareRecovery", "title": "AG Recover: Prepare Offline Recovery (离线恢复准备)" },
       { "command": "agRecover.export", "title": "AG Recover: Export Conversation to Markdown" },
       { "command": "agRecover.search", "title": "AG Recover: Search Conversations" },
       { "command": "agRecover.openBackupFolder", "title": "AG Recover: Open Backup Folder" },
@@ -45,7 +45,8 @@
         { "command": "agRecover.forceSync", "when": "view == agRecoverConversations", "group": "navigation" }
       ],
       "view/item/context": [
-        { "command": "agRecover.export", "when": "view == agRecoverConversations && viewItem == conversationWithMd" }
+        { "command": "agRecover.export", "when": "view == agRecoverConversations && viewItem == conversationWithMd" },
+        { "command": "agRecover.prepareRecovery", "when": "view == agRecoverConversations" }
       ]
     },
     "configuration": {

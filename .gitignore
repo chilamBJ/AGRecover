@@ -1,3 +1,8 @@
 out/
 node_modules/
 *.vsix
+
+# Guardian build
+Guardian/.build/
+Guardian/AG Guardian.app/
+RECOVERY_LOG_20260324.md

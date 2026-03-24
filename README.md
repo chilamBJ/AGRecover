@@ -1,147 +1,196 @@
 # AG Recover
 
-> Real-time backup & one-click restore for Antigravity IDE conversations.
+> 🛡 Antigravity IDE 聊天记录实时备份 & 一键恢复 — 再也不怕对话丢失。
 
-**AG crashes. Your chat history vanishes. Hours of AI context — gone.**
+**AG 崩了。聊天记录没了。几个小时的 AI 上下文 — 全没了。**
 
-AG Recover runs silently in the background, backing up every conversation the moment it hits disk. When AG inevitably loses your data, you get it back in seconds — not hours of re-explaining context to AI.
+AG Recover 在后台静默运行，实时备份每一条对话。当 AG 丢失你的数据时，几秒钟就能恢复 — 不需要重新向 AI 解释几个小时的上下文。
 
 ---
 
-## Why This Exists
+## 系统架构
 
-Antigravity stores conversations as `.pb` (protobuf) files in `~/.gemini/antigravity/conversations/`. Through testing, we discovered that **AG periodically deletes these files** — conversations that survived multiple app restarts and even system reboots disappear without warning. The root cause appears to be either a cloud sync overwrite or an internal GC mechanism.
-
-The official product offers no protection against this. So we built one.
-
-## How It Works
-
-AG Recover uses a **dual-layer backup** architecture with **three recovery paths**, ordered by reliability:
+AGR 采用**双组件解耦架构**：
 
 ```
-                    ┌──────────────────┐
-                    │   File Watcher    │
-                    │  conversations/   │
-                    │  brain/           │
-                    └────┬────────┬────┘
-                         │        │
-                   ┌─────▼──┐ ┌──▼──────┐
-                   │   L1   │ │   L2    │
-                   │ .pb    │ │ LS API  │
-                   │ copy   │ │ → MD    │
-                   └────────┘ └─────────┘
+┌─────────────────────────────────┐     ┌──────────────────────────────┐
+│     AGR Extension (v0.3)        │     │      AG Guardian (v1.0)      │
+│     VS Code / AG 插件           │     │      macOS 菜单栏应用         │
+│                                 │     │                              │
+│  • 实时监控 .pb 文件变化          │     │  • AG 进程状态监控  🟢🟡⚪    │
+│  • 自动备份到 ~/.ag-recover/     │ ──▶ │  • 对话列表可视化              │
+│  • brain/ 文件夹同步             │文件  │  • 一键离线恢复               │
+│  • Markdown 导出               │共享  │  • 打开备份文件夹              │
+│  • TreeView 对话浏览器           │     │  • 恢复完成后启动 AG           │
+└─────────────────────────────────┘     └──────────────────────────────┘
 ```
 
-### Layer 1: Raw File Backup (Primary)
+- **Extension** — 静默运行在 AG 内部，负责**持续备份**
+- **Guardian** — 独立于 AG，负责**离线恢复**（直接写入 `state.vscdb`）
 
-Watches `.pb` file changes → copies to backup dir with **write verification** (size check post-copy). Also backs up `state.vscdb` conversation index keys and `brain/` artifacts.
+两者通过共享目录 `~/.ag-recover/` 交换数据，无需实时通信。
 
-- Triggered by: file system events, debounced 2s
-- **Never follows deletions** — if AG removes a `.pb`, our copy stays
-- Detects and logs AG-side deletions: `[WARN] AG deleted xxx.pb — backup retained`
+## 为什么需要这个
 
-### Layer 2: Markdown Export (Fallback)
+Antigravity 将对话存储为 `.pb` (protobuf) 文件。通过测试我们发现，**AG 会周期性删除这些文件** — 在多次重启甚至系统重启后都存活的对话，会在某个时刻突然消失。根因可能是云同步覆盖或内部 GC 机制。
 
-Connects to AG's Language Server via its internal gRPC-Web API (`GetAllCascadeTrajectories`, `GetCascadeTrajectorySteps`), converts structured conversation data to human-readable Markdown.
+官方产品没有任何保护措施。所以我们做了一个。
 
-- Includes: user inputs, AI responses (with thinking), code edits (diffs), commands, web searches
-- Throttled at 60s intervals per conversation
-- Works independently of L1 — if LS is down, L1 still runs
+---
 
-### Why Three Recovery Paths
+## 快速开始
 
-| Path | Method | Use Case | Invasiveness |
-|------|--------|----------|--------------|
-| **Selective Inject** | Copy single `.pb` → LS force-load | Restore specific conversations to native AG history | Minimal (one file) |
-| **L1 Bulk Restore** | Copy all `.pb` + merge `state.vscdb` | Disaster recovery — restore everything | Medium |
-| **L2 Read MD** | Let AI read backed-up `.md` files | Last resort when `.pb` files are unusable | Zero |
-
-Selective Inject is the recommended path: it copies one `.pb` back to AG's conversation directory, then calls the LS API to force-load it. The conversation appears in AG's native history picker **instantly, without restart, without touching `state.vscdb`**.
-
-## Self-Check Watchdog
-
-AG Recover monitors its own health:
-
-- **Consecutive L1 failure tracking** — 3+ failures triggers a modal error notification
-- **5-minute health checks** — verifies backup dir is writable, source dir exists, watcher is alive
-- **Stale sync detection** — compares source vs backup timestamps to catch dead watchers
-
-## Install
+### 1. 安装 Extension
 
 ```bash
-# From source
-git clone <repo>
-cd ag-recover
+git clone https://github.com/makcymal/AGRecover.git
+cd AGRecover
 npm install
 npm run compile
 npx vsce package --no-dependencies
 ```
 
-Then in Antigravity: `Extensions: Install from VSIX...` → select `ag-recover-0.2.0.vsix` → Reload.
+在 Antigravity 中：`Extensions: Install from VSIX...` → 选择 `ag-recover-0.3.0.vsix` → Reload。
 
-## Commands
+安装后 Extension 自动在后台运行，无需任何配置。
 
-| Command | Description |
-|---------|-------------|
-| `AG Recover: Force Sync Now` | Full sync immediately |
-| `AG Recover: Inject to AG History` | Selective inject — restore specific conversations |
-| `AG Recover: Restore All` | L1 bulk restore (merge or overwrite) |
-| `AG Recover: Export Conversation` | Export selected conversation to `.md` |
-| `AG Recover: Search Conversations` | Full-text search across backed-up conversations |
-| `AG Recover: Open Backup Folder` | Open backup directory in file manager |
-| `AG Recover: Show Sync Status` | Show output log |
+### 2. 构建 Guardian (macOS)
 
-## Configuration
+```bash
+cd Guardian
+chmod +x build.sh
+./build.sh
+```
+
+构建完成后：
+
+```bash
+# 直接运行
+open "AG Guardian.app"
+
+# 或安装到 Applications
+cp -r "AG Guardian.app" /Applications/
+
+# 设为开机自启
+# 系统设置 → 通用 → 登录项 → 添加 AG Guardian
+```
+
+菜单栏会出现 🟢 AGR 图标，点击弹出管理面板。
+
+---
+
+## Extension 功能
+
+### 备份机制
+
+| 层级 | 内容 | 方式 | 触发 |
+|------|------|------|------|
+| **L1** | `.pb` 原始文件 | 文件复制 + 写入校验 | 文件变化（防抖 2s） |
+| **L2** | Markdown 导出 | LS API → 格式化 | 手动 Force Sync |
+| **brain/** | 工件文件夹 | 文件夹同步 | 伴随 L1 |
+| **state keys** | 对话索引 | vscdb 键值提取 | 伴随 L1 |
+
+- **永不跟随删除** — AG 删了 `.pb`，备份不会删
+- **写入校验** — 每次复制后检查文件大小
+- **AG 删除检测** — 日志记录 `[WARN] AG deleted xxx.pb — backup retained`
+
+### 命令
+
+| 命令 | 说明 |
+|------|------|
+| `AG Recover: Force Sync Now` | 完整同步（L1 + L2 + Markdown） |
+| `AG Recover: Open Backup Folder` | 打开备份目录 |
+| `AG Recover: Show Sync Status` | 显示同步日志 |
+
+### 侧边栏
+
+左侧 TreeView 按日期分组（今天 / 昨天 / 本周 / 更早），点击查看备份的 Markdown 文件。
+
+### 配置
 
 ```jsonc
 {
-  "agRecover.backupDir": "",              // Default: ~/.ag-recover
-  "agRecover.autoBackup": true,           // Auto-backup on startup
-  "agRecover.gitAutoCommit": false,       // Git auto-commit backups
-  "agRecover.gitScope": ["conversations_md", "brain"],
-  "agRecover.mdSyncIntervalSeconds": 60   // L2 MD sync interval
+  "agRecover.backupDir": "",              // 默认: ~/.ag-recover
+  "agRecover.autoBackup": true,           // 启动时自动备份
+  "agRecover.gitAutoCommit": false,       // Git 自动提交备份
+  "agRecover.mdSyncIntervalSeconds": 60   // L2 同步间隔（秒）
 }
 ```
 
-## Status Bar
+---
+
+## Guardian 功能
+
+### 菜单栏状态
+
+| 图标 | 状态 | 含义 |
+|------|------|------|
+| 🟢 AGR | 保护中 | AG 运行 + 备份活跃 |
+| 🟡 AGR | 警告 | AG 运行 + 备份停滞 |
+| ⚪ AGR | 待命 | AG 未运行 |
+| 🔴 AGR | 离线 | 备份目录不存在 |
+
+### 恢复流程
+
+1. 在 Guardian 面板中查看缺失对话（自动检测 `state.vscdb` 索引差异）
+2. 勾选要恢复的对话
+3. **退出 AG** (Cmd+Q)
+4. 点击 **"恢复"** 按钮
+5. Guardian 直接写入 `state.vscdb`（注入前自动备份）
+6. 点击 **"启动 AG"** → 对话已恢复
+
+### 技术细节
+
+- **离线注入** — 通过 `sqlite3` 命令行直接操作 `state.vscdb`
+- **Protobuf 编解码** — Swift 原生实现 wire format 编解码器
+- **注入前备份** — 自动创建 `state.vscdb.guardian_backup_*`
+- **安全写入** — 合并而非覆盖现有索引数据
+
+---
+
+## 项目结构
 
 ```
-$(sync~spin) AG Recover: Writing...     ← Syncing (animated)
-$(pass-filled) AG Recover: 128 convs ✓  ← Success (green, 3s)
-$(check) AG Recover: 128 convs | 2m ago ← Idle
-$(warning) AG Recover: LS unreachable   ← Warning
-$(error) AG Recover: Backup failed (3x) ← Critical
+AGRecover/
+├── src/                      # Extension 源码 (TypeScript)
+│   ├── extension.ts          # 入口 + 命令注册
+│   ├── config.ts             # 配置 + 跨平台路径
+│   ├── syncEngine.ts         # 核心: 文件监控 + L1/L2 备份
+│   ├── lsClient.ts           # LS 进程发现 + gRPC-Web API
+│   ├── mdFormatter.ts        # 对话 → Markdown
+│   ├── stateDb.ts            # state.vscdb 读写
+│   ├── protobufCodec.ts      # Protobuf wire format 编解码
+│   ├── offlineRecover.ts     # 离线恢复数据准备
+│   ├── restore.ts            # L1 批量恢复
+│   ├── inject.ts             # 选择性注入
+│   ├── treeView.ts           # 侧边栏 TreeView
+│   └── statusBar.ts          # 状态栏指示器
+│
+├── Guardian/                 # Guardian 源码 (Swift)
+│   ├── Package.swift
+│   ├── build.sh              # 一键构建脚本
+│   └── Sources/
+│       ├── App.swift              # AppKit 入口 + 菜单栏
+│       ├── Models/
+│       │   └── AppState.swift     # 全局状态
+│       ├── Services/
+│       │   ├── StatusMonitor.swift     # AG 进程 + 备份扫描
+│       │   ├── RecoveryManager.swift   # 离线注入逻辑
+│       │   └── ProtobufCodec.swift     # Protobuf 编解码 (Swift)
+│       └── Views/
+│           └── PopoverView.swift      # Popover UI
+│
+├── package.json
+└── README.md
 ```
 
-## Sidebar
+## 平台支持
 
-TreeView grouped by date (Today / Yesterday / This Week / Older). Click to open backed-up conversation in Markdown.
-
-## Architecture
-
-```
-src/
-├── extension.ts     # Entry point, command registration
-├── config.ts        # Settings + cross-platform AG path resolution
-├── syncEngine.ts    # Core: file watcher, L1/L2 orchestration, health checks
-├── lsClient.ts      # LS process discovery + gRPC-Web API client
-├── mdFormatter.ts   # Conversation steps → Markdown
-├── stateDb.ts       # state.vscdb read/write via sql.js
-├── restore.ts       # L1 bulk restore (merge-first, overwrite fallback)
-├── inject.ts        # Selective inject (single .pb + LS force-load)
-├── treeView.ts      # Sidebar TreeView
-└── statusBar.ts     # Status bar indicator
-```
-
-**Runtime dependency**: `sql.js` (WASM SQLite) — required for reading/writing `state.vscdb` conversation index.
-
-## Platform Support
-
-- ✅ macOS (primary)
-- ⚠️ Windows (paths mapped, untested)
-- ⚠️ Linux (paths mapped, untested)
-
-LS port discovery includes a fix for the VPN/TUN `lsof` bug (filters by process name `language_` to avoid AirPlay port collision).
+| 平台 | Extension | Guardian |
+|------|-----------|----------|
+| ✅ macOS | 完整支持 | 完整支持 |
+| ⚠️ Windows | 路径已适配，未测试 | 不支持 |
+| ⚠️ Linux | 路径已适配，未测试 | 不支持 |
 
 ## License
 

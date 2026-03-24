@@ -6,6 +6,7 @@ import { StatusBarManager } from './statusBar';
 import { LSClient, TrajectorySummary } from './lsClient';
 import { formatConversationToMd, formatIndexMd, ConversationMeta } from './mdFormatter';
 import { backupStateKeys } from './stateDb';
+import { exportSummaries, writeHeartbeat } from './offlineRecover';
 
 export class SyncEngine {
   private watcher: vscode.FileSystemWatcher | null = null;
@@ -78,8 +79,8 @@ export class SyncEngine {
     this.out.appendLine('[Sync] Engine started');
   }
 
-  /** 全量同步 */
-  async fullSync() {
+  /** 全量同步（manual=true 时执行完整同步含 LS API） */
+  async fullSync(manual = false) {
     if (this.syncing) return;
     this.syncing = true;
     this.statusBar.setSyncing();
@@ -87,34 +88,47 @@ export class SyncEngine {
     const agPaths = getAGPaths();
 
     try {
-      // L1: .pb 文件
+      // L1: .pb 文件（纯文件操作，安全）
       this.syncFiles(agPaths.conversationsDir, path.join(config.backupDir, 'conversations'), '.pb');
 
-      // L1: brain artifacts
+      // L1: brain artifacts（纯文件操作，安全）
       this.syncDirRecursive(agPaths.brainDir, path.join(config.backupDir, 'brain'));
 
-      // L1: state.vscdb keys
-      await backupStateKeys(agPaths.stateVscdb, path.join(config.backupDir, 'state', 'state_keys_backup.json'));
+      // L1: state.vscdb keys（sql.js WASM — 仅手动触发时执行）
+      if (manual) {
+        try {
+          await backupStateKeys(agPaths.stateVscdb, path.join(config.backupDir, 'state', 'state_keys_backup.json'));
+        } catch (e: any) {
+          this.out.appendLine(`[Sync] state.vscdb backup skipped: ${e.message}`);
+        }
+      }
 
       // L1 成功 → 重置失败计数
       this.consecutiveL1Failures = 0;
       this.lastSuccessfulL1 = new Date();
 
-      // L2: MD 导出
-      const lsOk = await this.lsClient.discover();
-      if (lsOk) {
-        await this.syncAllMd(config);
-      } else {
-        this.out.appendLine('[Sync] LS unavailable — L1 only');
-        this.statusBar.setWarning('LS unreachable — L1 active');
+      // L2: MD 导出（LS API — 仅手动触发时执行）
+      if (manual) {
+        try {
+          const lsOk = await this.lsClient.discover();
+          if (lsOk) {
+            await this.syncAllMd(config);
+            await exportSummaries(this.lsClient, this.out);
+          } else {
+            this.out.appendLine('[Sync] LS unavailable — L1 only');
+          }
+        } catch (e: any) {
+          this.out.appendLine(`[Sync] L2 failed: ${e.message}`);
+        }
       }
 
       this.writeMeta(config.backupDir);
+      writeHeartbeat(this.out);
       if (config.gitAutoCommit) this.gitCommit(config.backupDir, config.gitScope);
 
       const count = this.countPb(config.backupDir);
       this.statusBar.setSynced(count);
-      this.out.appendLine(`[Sync] Full sync done: ${count} conversations`);
+      this.out.appendLine(`[Sync] ${manual ? 'Full' : 'Quick'} sync done: ${count} conversations`);
     } catch (e: any) {
       this.onL1Failure(`fullSync: ${e.message}`);
     } finally {
@@ -155,14 +169,20 @@ export class SyncEngine {
     this.statusBar.setSyncing();
 
     try {
-      // L1
+      // L1: .pb 复制（核心）
       this.verifiedCopy(pbPath, path.join(config.backupDir, 'conversations', `${cascadeId}.pb`));
-      await backupStateKeys(
-        getAGPaths().stateVscdb,
-        path.join(config.backupDir, 'state', 'state_keys_backup.json')
-      );
       this.consecutiveL1Failures = 0;
       this.lastSuccessfulL1 = new Date();
+
+      // state.vscdb 备份（非致命，AG 可能锁住文件）
+      try {
+        await backupStateKeys(
+          getAGPaths().stateVscdb,
+          path.join(config.backupDir, 'state', 'state_keys_backup.json')
+        );
+      } catch (e: any) {
+        this.out.appendLine(`[Sync] state.vscdb backup skipped (locked?): ${e.message}`);
+      }
 
       // L2（节流）
       const last = this.l2LastSync.get(cascadeId) || 0;
@@ -337,15 +357,22 @@ export class SyncEngine {
 
   // ── 自检机制 ──
 
-  /** L1 失败处理：累计失败 → 达阈值时弹窗告警 */
+  private lastErrorDialog = 0;
+  private static readonly ERROR_DIALOG_COOLDOWN = 10 * 60 * 1000; // 10 min
+
+  /** L1 失败处理：累计失败 → 达阈值时弹窗告警（节流） */
   private onL1Failure(detail: string) {
     this.consecutiveL1Failures++;
     this.out.appendLine(`[HEALTH] L1 failure #${this.consecutiveL1Failures}: ${detail}`);
     this.statusBar.setError(`Backup failed (${this.consecutiveL1Failures}x)`);
 
-    if (this.consecutiveL1Failures >= SyncEngine.MAX_L1_FAILURES) {
+    if (
+      this.consecutiveL1Failures >= SyncEngine.MAX_L1_FAILURES &&
+      Date.now() - this.lastErrorDialog >= SyncEngine.ERROR_DIALOG_COOLDOWN
+    ) {
+      this.lastErrorDialog = Date.now();
       vscode.window.showErrorMessage(
-        `⚠️ AG Recover: 核心备份连续失败 ${this.consecutiveL1Failures} 次！你的对话可能没有被备份。\n\n最近错误: ${detail}`,
+        `⚠️ AGR: 核心备份连续失败 ${this.consecutiveL1Failures} 次！\n\n最近错误: ${detail}`,
         '查看日志',
         '重试同步'
       ).then((action) => {

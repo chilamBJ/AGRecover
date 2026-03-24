@@ -8,7 +8,7 @@ export class StatusBarManager {
   private dotCount = 0;
 
   constructor() {
-    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -100);
+    this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     this.item.command = 'agRecover.showStatus';
     this.update();
     this.item.show();
@@ -34,7 +34,7 @@ export class StatusBarManager {
     this.stopDotAnimation();
     this.syncCount = count;
     this.lastSyncTime = new Date();
-    this.item.text = `$(pass-filled) AG Recover: ${this.syncCount} convs ✓`;
+    this.item.text = `$(pass-filled) AGR: ${this.syncCount} convs ✓`;
     this.item.backgroundColor = undefined;
     this.item.tooltip = this.buildTooltip();
 
@@ -45,28 +45,28 @@ export class StatusBarManager {
   /** 警告（L2 不可用等非致命问题） */
   setWarning(msg: string) {
     this.stopDotAnimation();
-    this.item.text = `$(warning) AG Recover: ${msg}`;
+    this.item.text = `$(warning) AGR: ${msg}`;
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   }
 
   /** 错误（核心备份失败 — 必须引起注意） */
   setError(msg: string) {
     this.stopDotAnimation();
-    this.item.text = `$(error) AG Recover: ${msg}`;
+    this.item.text = `$(error) AGR: ${msg}`;
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   }
 
   /** 常态显示 */
   private update() {
     const timeStr = this.lastSyncTime ? this.relativeTime(this.lastSyncTime) : 'never';
-    this.item.text = `$(check) AG Recover: ${this.syncCount} convs | ${timeStr}`;
+    this.item.text = `$(check) AGR: ${this.syncCount} convs | ${timeStr}`;
     this.item.backgroundColor = undefined;
     this.item.tooltip = this.buildTooltip();
   }
 
   private buildTooltip(): string {
     const timeStr = this.lastSyncTime ? this.relativeTime(this.lastSyncTime) : 'never';
-    return `AG Recover running\n${this.syncCount} conversations backed up\nLast sync: ${timeStr}\n\nClick for details`;
+    return `AGR running\n${this.syncCount} conversations backed up\nLast sync: ${timeStr}\n\nClick for details`;
   }
 
   private relativeTime(date: Date): string {

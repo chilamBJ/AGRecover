@@ -5,7 +5,7 @@ import { getConfig } from './config';
 import { StatusBarManager } from './statusBar';
 import { SyncEngine } from './syncEngine';
 import { restoreConversations } from './restore';
-import { injectConversation } from './inject';
+import { prepareRecoveryCommand } from './offlineRecover';
 import { GroupedTreeProvider } from './treeView';
 
 let statusBar: StatusBarManager;
@@ -30,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('agRecover.forceSync', async () => {
       outputChannel.appendLine('[CMD] Force sync');
-      await syncEngine.fullSync();
+      await syncEngine.fullSync(true);
       treeProvider.refresh();
     }),
 
@@ -39,10 +39,9 @@ export function activate(context: vscode.ExtensionContext) {
       await restoreConversations(outputChannel);
     }),
 
-    vscode.commands.registerCommand('agRecover.inject', async () => {
-      outputChannel.appendLine('[CMD] Inject');
-      await injectConversation(syncEngine.ls, outputChannel);
-      treeProvider.refresh();
+    vscode.commands.registerCommand('agRecover.prepareRecovery', async () => {
+      outputChannel.appendLine('[CMD] Prepare Recovery');
+      await prepareRecoveryCommand(syncEngine.ls, outputChannel);
     }),
 
     vscode.commands.registerCommand('agRecover.export', async (item?: any) => {
@@ -76,7 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
       statusBar.setError('Start failed');
     });
 
-  outputChannel.appendLine('[Init] AG Recover v0.2 activated');
+  outputChannel.appendLine('[Init] AGR v0.3 activated');
 }
 
 export function deactivate() {

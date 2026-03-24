@@ -4,6 +4,8 @@ export class StatusBarManager {
   private item: vscode.StatusBarItem;
   private syncCount = 0;
   private lastSyncTime: Date | null = null;
+  private dotTimer: NodeJS.Timeout | null = null;
+  private dotCount = 0;
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -100);
@@ -12,33 +14,59 @@ export class StatusBarManager {
     this.item.show();
   }
 
+  /** 写入中：动态 ... 动画 */
   setSyncing() {
-    this.item.text = '$(sync~spin) AG Recover: Syncing...';
+    this.stopDotAnimation();
+    this.dotCount = 0;
+    this.dotTimer = setInterval(() => {
+      this.dotCount = (this.dotCount % 3) + 1;
+      const dots = '.'.repeat(this.dotCount);
+      this.item.text = `$(sync~spin) AG Recover: Writing${dots}`;
+      this.item.backgroundColor = undefined;
+    }, 400);
+    this.item.text = '$(sync~spin) AG Recover: Writing.';
     this.item.backgroundColor = undefined;
-    this.item.tooltip = 'Syncing conversations...';
+    this.item.tooltip = 'Backing up conversations...';
   }
 
+  /** 写入成功：绿色指示灯 */
   setSynced(count: number) {
+    this.stopDotAnimation();
     this.syncCount = count;
     this.lastSyncTime = new Date();
-    this.update();
+    this.item.text = `$(pass-filled) AG Recover: ${this.syncCount} convs ✓`;
+    this.item.backgroundColor = undefined;
+    this.item.tooltip = this.buildTooltip();
+
+    // 3 秒后恢复常态显示
+    setTimeout(() => this.update(), 3000);
   }
 
+  /** 警告（L2 不可用等非致命问题） */
   setWarning(msg: string) {
+    this.stopDotAnimation();
     this.item.text = `$(warning) AG Recover: ${msg}`;
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   }
 
+  /** 错误（核心备份失败 — 必须引起注意） */
   setError(msg: string) {
+    this.stopDotAnimation();
     this.item.text = `$(error) AG Recover: ${msg}`;
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   }
 
+  /** 常态显示 */
   private update() {
     const timeStr = this.lastSyncTime ? this.relativeTime(this.lastSyncTime) : 'never';
     this.item.text = `$(check) AG Recover: ${this.syncCount} convs | ${timeStr}`;
     this.item.backgroundColor = undefined;
-    this.item.tooltip = `AG Recover running\n${this.syncCount} conversations backed up\nLast sync: ${timeStr}`;
+    this.item.tooltip = this.buildTooltip();
+  }
+
+  private buildTooltip(): string {
+    const timeStr = this.lastSyncTime ? this.relativeTime(this.lastSyncTime) : 'never';
+    return `AG Recover running\n${this.syncCount} conversations backed up\nLast sync: ${timeStr}\n\nClick for details`;
   }
 
   private relativeTime(date: Date): string {
@@ -50,7 +78,15 @@ export class StatusBarManager {
     return `${Math.floor(hours / 24)}d ago`;
   }
 
+  private stopDotAnimation() {
+    if (this.dotTimer) {
+      clearInterval(this.dotTimer);
+      this.dotTimer = null;
+    }
+  }
+
   dispose() {
+    this.stopDotAnimation();
     this.item.dispose();
   }
 }

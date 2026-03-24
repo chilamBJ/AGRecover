@@ -67,10 +67,20 @@ export async function restoreConversations(out: vscode.OutputChannel) {
     let stateResult = { restored: 0, skipped: 0, errors: [] as string[] };
     if (fs.existsSync(stateBackup) && fs.existsSync(agPaths.stateVscdb)) {
       stateResult = await restoreStateKeys(agPaths.stateVscdb, stateBackup, mode);
-      // 如果合并失败，自动 fallback 到全覆盖
+      // 合并失败 → 需要用户确认才能全覆盖
       if (mode === 'merge' && stateResult.errors.length > 0) {
-        out.appendLine('[Restore] Merge had errors, retrying with overwrite...');
-        stateResult = await restoreStateKeys(agPaths.stateVscdb, stateBackup, 'overwrite');
+        out.appendLine(`[Restore] Merge errors: ${stateResult.errors.join('; ')}`);
+        const retry = await vscode.window.showWarningMessage(
+          `AG Recover: 合并索引时出错（${stateResult.errors.length} 个错误）。是否尝试全量覆盖？`,
+          { modal: true, detail: `错误详情：\n${stateResult.errors.join('\n')}\n\n全量覆盖会替换现有索引数据（不影响 auth token）。` },
+          '全量覆盖',
+          '跳过索引恢复'
+        );
+        if (retry === '全量覆盖') {
+          stateResult = await restoreStateKeys(agPaths.stateVscdb, stateBackup, 'overwrite');
+        } else {
+          out.appendLine('[Restore] User skipped state overwrite');
+        }
       }
     }
 

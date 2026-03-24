@@ -18,6 +18,11 @@ export class SyncEngine {
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private disposables: vscode.Disposable[] = [];
   private syncing = false;
+  private healthCheckTimer: NodeJS.Timeout | null = null;
+  private consecutiveL1Failures = 0;
+  private lastSuccessfulL1: Date | null = null;
+  private static readonly MAX_L1_FAILURES = 3;
+  private static readonly HEALTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 min
 
   constructor(statusBar: StatusBarManager, outputChannel: vscode.OutputChannel) {
     this.statusBar = statusBar;
@@ -65,6 +70,9 @@ export class SyncEngine {
       this.disposables.push(this.brainWatcher);
     }
 
+    // 启动健康检查定时器
+    this.healthCheckTimer = setInterval(() => this.healthCheck(), SyncEngine.HEALTH_CHECK_INTERVAL);
+
     this.out.appendLine('[Sync] Engine started');
   }
 
@@ -86,6 +94,10 @@ export class SyncEngine {
       // L1: state.vscdb keys
       await backupStateKeys(agPaths.stateVscdb, path.join(config.backupDir, 'state', 'state_keys_backup.json'));
 
+      // L1 成功 → 重置失败计数
+      this.consecutiveL1Failures = 0;
+      this.lastSuccessfulL1 = new Date();
+
       // L2: MD 导出
       const lsOk = await this.lsClient.discover();
       if (lsOk) {
@@ -102,8 +114,7 @@ export class SyncEngine {
       this.statusBar.setSynced(count);
       this.out.appendLine(`[Sync] Full sync done: ${count} conversations`);
     } catch (e: any) {
-      this.statusBar.setError('Sync failed');
-      this.out.appendLine(`[Sync] Error: ${e.message}`);
+      this.onL1Failure(`fullSync: ${e.message}`);
     } finally {
       this.syncing = false;
     }
@@ -148,6 +159,8 @@ export class SyncEngine {
         getAGPaths().stateVscdb,
         path.join(config.backupDir, 'state', 'state_keys_backup.json')
       );
+      this.consecutiveL1Failures = 0;
+      this.lastSuccessfulL1 = new Date();
 
       // L2（节流）
       const last = this.l2LastSync.get(cascadeId) || 0;
@@ -162,7 +175,7 @@ export class SyncEngine {
       if (config.gitAutoCommit) this.gitCommit(config.backupDir, config.gitScope);
       this.statusBar.setSynced(this.countPb(config.backupDir));
     } catch (e: any) {
-      this.out.appendLine(`[Sync] syncOne(${cascadeId.substring(0, 8)}…) error: ${e.message}`);
+      this.onL1Failure(`syncOne(${cascadeId.substring(0, 8)}…): ${e.message}`);
     }
   }
 
@@ -260,7 +273,7 @@ export class SyncEngine {
 
   private writeMeta(dir: string) {
     fs.writeFileSync(path.join(dir, '.ag-recover-meta.json'), JSON.stringify({
-      version: '0.1.0',
+      version: '0.2.0',
       lastSyncTime: new Date().toISOString(),
       platform: process.platform,
       conversationCount: this.countPb(dir),
@@ -299,7 +312,84 @@ export class SyncEngine {
     } catch {}
   }
 
+  // ── 自检机制 ──
+
+  /** L1 失败处理：累计失败 → 达阈值时弹窗告警 */
+  private onL1Failure(detail: string) {
+    this.consecutiveL1Failures++;
+    this.out.appendLine(`[HEALTH] L1 failure #${this.consecutiveL1Failures}: ${detail}`);
+    this.statusBar.setError(`Backup failed (${this.consecutiveL1Failures}x)`);
+
+    if (this.consecutiveL1Failures >= SyncEngine.MAX_L1_FAILURES) {
+      vscode.window.showErrorMessage(
+        `⚠️ AG Recover: 核心备份连续失败 ${this.consecutiveL1Failures} 次！你的对话可能没有被备份。\n\n最近错误: ${detail}`,
+        '查看日志',
+        '重试同步'
+      ).then((action) => {
+        if (action === '查看日志') this.out.show();
+        if (action === '重试同步') this.fullSync();
+      });
+    }
+  }
+
+  /** 定期健康检查 */
+  private healthCheck() {
+    const config = getConfig();
+    const agPaths = getAGPaths();
+    const issues: string[] = [];
+
+    // 检查 1：备份目录是否可写
+    try {
+      const testFile = path.join(config.backupDir, '.health-check');
+      fs.writeFileSync(testFile, Date.now().toString(), 'utf-8');
+      fs.unlinkSync(testFile);
+    } catch {
+      issues.push('备份目录不可写');
+    }
+
+    // 检查 2：watcher 是否还活着（源目录是否存在）
+    if (!fs.existsSync(agPaths.conversationsDir)) {
+      issues.push('AG 对话目录不存在');
+    }
+
+    // 检查 3：距离上次成功 L1 是否超过 30 分钟
+    if (this.lastSuccessfulL1) {
+      const minsSinceLast = (Date.now() - this.lastSuccessfulL1.getTime()) / 60000;
+      if (minsSinceLast > 30) {
+        // 检查源目录是否有更新的文件（如果有但没被同步，说明 watcher 可能挂了）
+        try {
+          const pbFiles = fs.readdirSync(agPaths.conversationsDir).filter(f => f.endsWith('.pb'));
+          for (const f of pbFiles) {
+            const srcMtime = fs.statSync(path.join(agPaths.conversationsDir, f)).mtimeMs;
+            const destPath = path.join(config.backupDir, 'conversations', f);
+            if (!fs.existsSync(destPath) || fs.statSync(destPath).mtimeMs < srcMtime) {
+              issues.push('检测到未同步的对话文件 — file watcher 可能失效');
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (issues.length > 0) {
+      const msg = issues.join('；');
+      this.out.appendLine(`[HEALTH] Issues detected: ${msg}`);
+      this.statusBar.setError(issues[0]);
+      vscode.window.showWarningMessage(
+        `AG Recover 健康检查发现问题：${msg}`,
+        '查看日志',
+        '重试同步'
+      ).then((action) => {
+        if (action === '查看日志') this.out.show();
+        if (action === '重试同步') this.fullSync();
+      });
+    } else {
+      this.out.appendLine('[HEALTH] All checks passed');
+    }
+  }
+
   dispose() {
+    if (this.healthCheckTimer) clearInterval(this.healthCheckTimer);
     for (const t of this.debounceTimers.values()) clearTimeout(t);
     for (const d of this.disposables) d.dispose();
   }

@@ -36,7 +36,10 @@ export class LSClient {
       this.processes = [];
       const platform = os.platform();
       const psOutput = this.getPsOutput(platform);
-      if (!psOutput) return false;
+      if (!psOutput) {
+        this.log('[LS] No ps output');
+        return false;
+      }
 
       for (const line of psOutput.split('\n')) {
         if (!line.includes('language_server')) continue;
@@ -50,18 +53,59 @@ export class LSClient {
 
         const pid = parseInt(pidMatch[1]);
         const csrfToken = csrfMatch[1];
-        const port = this.discoverPort(pid, platform);
+        const ports = this.discoverPorts(pid, platform);
+        this.log(`[LS] PID=${pid} candidate ports: [${ports.join(', ')}]`);
 
-        if (port) {
-          this.processes.push({ pid, csrfToken, port });
-          this.log(`[LS] Found PID=${pid} Port=${port}`);
+        // Probe 每个端口找到能响应 API 的那个
+        for (const port of ports) {
+          try {
+            const ok = await this.probePort(port, csrfToken);
+            if (ok) {
+              this.processes.push({ pid, csrfToken, port });
+              this.log(`[LS] ✓ PID=${pid} Port=${port} (API verified)`);
+              break;
+            }
+          } catch {
+            this.log(`[LS] ✗ Port ${port} no response`);
+          }
         }
       }
+      this.log(`[LS] Discovery done: ${this.processes.length} active LS`);
       return this.processes.length > 0;
     } catch (e: any) {
       this.log(`[LS] Discovery error: ${e.message}`);
       return false;
     }
+  }
+
+  /** Probe 端口是否能响应 API */
+  private probePort(port: number, csrfToken: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const req = https.request({
+        hostname: '127.0.0.1',
+        port,
+        path: '/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Connect-Protocol-Version': '1',
+          'X-Codeium-Csrf-Token': csrfToken,
+          'Content-Length': 2,
+        },
+        rejectUnauthorized: false,
+        timeout: 3000,
+      }, (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          resolve(data.includes('trajectorySummaries') || res.statusCode === 200);
+        });
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+      req.write('{}');
+      req.end();
+    });
   }
 
   private getPsOutput(platform: string): string | null {
@@ -78,25 +122,32 @@ export class LSClient {
     }
   }
 
-  private discoverPort(pid: number, platform: string): number | null {
+  /** 返回 LS 进程的所有 LISTEN 端口 */
+  private discoverPorts(pid: number, platform: string): number[] {
+    const ports: number[] = [];
     try {
       if (platform === 'win32') {
         const out = execSync(`netstat -ano | findstr "${pid}" | findstr "LISTENING"`, {
           encoding: 'utf-8', timeout: 5000
         });
-        const m = out.match(/:(\d+)\s/);
-        return m ? parseInt(m[1]) : null;
-      }
-      // macOS / Linux — 带 VPN/TUN 修复
-      const out = execSync(`lsof -p ${pid} -i -P -n`, { encoding: 'utf-8', timeout: 5000 });
-      for (const line of out.split('\n')) {
-        if (line.includes('LISTEN') && line.includes('language_')) {
+        for (const line of out.split('\n')) {
           const m = line.match(/:(\d+)\s/);
-          if (m) return parseInt(m[1]);
+          if (m) ports.push(parseInt(m[1]));
+        }
+        return ports;
+      }
+      // macOS / Linux — 用 -a 确保 AND 过滤
+      const out = execSync(`lsof -a -p ${pid} -i -P -n`, { encoding: 'utf-8', timeout: 5000 });
+      for (const line of out.split('\n')) {
+        if (line.includes('LISTEN')) {
+          const m = line.match(/:(\d+)\s/);
+          if (m) ports.push(parseInt(m[1]));
         }
       }
-    } catch { /* lsof can fail */ }
-    return null;
+    } catch (e: any) {
+      this.log(`[LS] Port discovery failed PID=${pid}: ${e.message}`);
+    }
+    return ports;
   }
 
   /** 获取所有对话摘要 */

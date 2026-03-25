@@ -1,5 +1,6 @@
 .vscode/**
 src/**
+Guardian/**
 tsconfig.json
 .gitignore
 *.ts
@@ -8,3 +9,4 @@ node_modules/**/test/**
 node_modules/**/tests/**
 node_modules/**/examples/**
 node_modules/**/docs/**
+RECOVERY_LOG_*.md

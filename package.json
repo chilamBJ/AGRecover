@@ -2,7 +2,7 @@
   "name": "ag-recover",
   "displayName": "AG Recover",
   "description": "Antigravity 聊天记录实时备份 & 一键恢复",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "publisher": "ag-recover",
   "engines": {
     "vscode": "^1.85.0"

@@ -87,7 +87,7 @@ function formatStep(step: any): string | null {
 }
 
 /** 生成对话索引 MD */
-export function formatIndexMd(conversations: Map<string, ConversationMeta>): string {
+export function formatIndexMd(conversations: Map<string, ConversationMeta>, dirNames?: Map<string, string>): string {
   const lines: string[] = [
     '# AG Recover — Conversation Index',
     '',
@@ -103,7 +103,8 @@ export function formatIndexMd(conversations: Map<string, ConversationMeta>): str
   );
 
   for (const [id, m] of sorted) {
-    lines.push(`| [${m.title || 'Untitled'}](./${id}/conversation.md) | ${m.createdTime?.substring(0, 10) || '-'} | ${m.stepCount} | ${m.workspaces[0] || '-'} |`);
+    const dir = dirNames?.get(id) || id;
+    lines.push(`| [${m.title || 'Untitled'}](./${dir}/conversation.md) | ${m.createdTime?.substring(0, 10) || '-'} | ${m.stepCount} | ${m.workspaces[0] || '-'} |`);
   }
   return lines.join('\n');
 }

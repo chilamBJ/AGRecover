@@ -63,17 +63,19 @@ class StatusMonitor {
         var conversations: [ConversationItem] = []
         let knownIds = Set(pbFiles.map { $0.replacingOccurrences(of: ".pb", with: "") })
 
-        // 从 MD metadata 获取标题
+        // 从 MD metadata 获取标题（目录名可能是 UUID 或人类可读名）
         var titleMap: [String: String] = [:]
         var mtimeMap: [String: Date] = [:]
         if let dirs = try? fm.contentsOfDirectory(atPath: mdDir) {
-            for d in dirs where !d.hasPrefix("_") {
+            for d in dirs where !d.hasPrefix("_") && !d.hasSuffix(".md") {
                 let metaPath = "\(mdDir)/\(d)/metadata.json"
                 if let data = fm.contents(atPath: metaPath),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    titleMap[d] = json["title"] as? String ?? ""
+                    // 用 metadata 里的 cascadeId 做 key
+                    let cid = (json["cascadeId"] as? String) ?? d
+                    titleMap[cid] = json["title"] as? String ?? ""
                     if let ts = json["lastModifiedTime"] as? String {
-                        mtimeMap[d] = ISO8601DateFormatter().date(from: ts)
+                        mtimeMap[cid] = ISO8601DateFormatter().date(from: ts)
                     }
                 }
             }

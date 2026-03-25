@@ -203,29 +203,108 @@ export class SyncEngine {
 
   // ── L2 MD 同步 ──
 
+  /** 构造人类可读的 MD 文件夹名：项目名_标题_UUID前8位 */
+  private mdDirName(meta: ConversationMeta): string {
+    const idPrefix = meta.cascadeId.substring(0, 8);
+    // 从 workspace 路径提取项目名
+    let project = '';
+    if (meta.workspaces.length > 0) {
+      const ws = meta.workspaces[0];
+      const parts = ws.replace(/\/+$/, '').split('/');
+      project = parts[parts.length - 1] || '';
+    }
+    const title = meta.title || 'Untitled';
+    const parts = [project, title, idPrefix].filter(Boolean);
+    return this.sanitizeDirName(parts.join('_'));
+  }
+
+  private sanitizeDirName(name: string): string {
+    return name
+      .replace(/[/\\:*?"<>|]/g, '_')  // 文件系统非法字符
+      .replace(/\s+/g, '_')            // 空格 → 下划线
+      .replace(/_+/g, '_')             // 合并连续下划线
+      .replace(/^_|_$/g, '')           // 去首尾下划线
+      .substring(0, 120);              // 限制长度
+  }
+
+  /** 查找已有的同 cascadeId 的 MD 文件夹（旧 UUID 或旧命名） */
+  private findExistingMdDir(mdRoot: string, cascadeId: string): string | null {
+    if (!fs.existsSync(mdRoot)) return null;
+    // 精确匹配旧 UUID 文件夹
+    const uuidDir = path.join(mdRoot, cascadeId);
+    if (fs.existsSync(uuidDir)) return uuidDir;
+    // 搜索以 _UUID前缀 结尾的文件夹
+    const prefix = cascadeId.substring(0, 8);
+    try {
+      for (const d of fs.readdirSync(mdRoot, { withFileTypes: true })) {
+        if (d.isDirectory() && d.name.endsWith(`_${prefix}`)) {
+          // 验证 metadata 确认是同一对话
+          const mp = path.join(mdRoot, d.name, 'metadata.json');
+          if (fs.existsSync(mp)) {
+            try {
+              const m = JSON.parse(fs.readFileSync(mp, 'utf-8'));
+              if (m.cascadeId === cascadeId) return path.join(mdRoot, d.name);
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   private async syncAllMd(config: ReturnType<typeof getConfig>) {
     const summaries = await this.lsClient.getAllTrajectories();
+    const total = Object.keys(summaries).length;
+    let synced = 0;
+    let skipped = 0;
+
+    this.out.appendLine(`[Sync] MD: 发现 ${total} 个对话，开始导出...`);
 
     for (const [id, s] of Object.entries(summaries)) {
       const meta = this.toMeta(id, s);
       this.metas.set(id, meta);
 
-      // 跳过未修改的对话
-      const metaPath = path.join(config.backupDir, 'conversations_md', id, 'metadata.json');
-      if (fs.existsSync(metaPath)) {
-        try {
-          const old = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-          if (old.lastModifiedTime === s.lastModifiedTime) continue;
-        } catch {}
+      // 跳过未修改的对话（检查新旧文件夹）
+      const mdRoot = path.join(config.backupDir, 'conversations_md');
+      const existingDir = this.findExistingMdDir(mdRoot, id);
+      if (existingDir) {
+        const metaPath = path.join(existingDir, 'metadata.json');
+        if (fs.existsSync(metaPath)) {
+          try {
+            const old = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+            if (old.lastModifiedTime === s.lastModifiedTime) {
+              // 检查是否需要重命名旧 UUID 文件夹
+              const newName = this.mdDirName(meta);
+              const newDir = path.join(mdRoot, newName);
+              if (existingDir !== newDir && path.basename(existingDir) === id) {
+                try {
+                  fs.renameSync(existingDir, newDir);
+                  this.out.appendLine(`[Sync] MD: 重命名 ${id.substring(0, 8)}… → ${newName}`);
+                } catch {}
+              }
+              skipped++;
+              continue;
+            }
+          } catch {}
+        }
       }
 
       await this.syncOneMd(id, config, meta);
+      synced++;
+    }
+
+    this.out.appendLine(`[Sync] MD: 完成 — 导出 ${synced}，跳过 ${skipped}（未修改），共 ${total}`);
+
+    // 构建 dirNames 映射
+    const dirNames = new Map<string, string>();
+    for (const [id, meta] of this.metas) {
+      dirNames.set(id, this.mdDirName(meta));
     }
 
     // 写索引
     fs.writeFileSync(
       path.join(config.backupDir, 'conversations_md', '_index.md'),
-      formatIndexMd(this.metas),
+      formatIndexMd(this.metas, dirNames),
       'utf-8'
     );
   }
@@ -242,11 +321,20 @@ export class SyncEngine {
       const steps = await this.lsClient.getTrajectorySteps(cascadeId);
       if (steps.length === 0) return;
 
-      const mdDir = path.join(config.backupDir, 'conversations_md', cascadeId);
-      this.ensureDir(mdDir);
-      fs.writeFileSync(path.join(mdDir, 'conversation.md'), formatConversationToMd(meta, steps), 'utf-8');
-      fs.writeFileSync(path.join(mdDir, 'metadata.json'), JSON.stringify(meta, null, 2), 'utf-8');
-      this.out.appendLine(`[Sync] MD: ${meta.title} (${cascadeId.substring(0, 8)}…)`);
+      const mdRoot = path.join(config.backupDir, 'conversations_md');
+      const dirName = this.mdDirName(meta);
+
+      // 迁移旧 UUID 文件夹
+      const oldDir = this.findExistingMdDir(mdRoot, cascadeId);
+      const newDir = path.join(mdRoot, dirName);
+      if (oldDir && oldDir !== newDir) {
+        try { fs.renameSync(oldDir, newDir); } catch {}
+      }
+
+      this.ensureDir(newDir);
+      fs.writeFileSync(path.join(newDir, 'conversation.md'), formatConversationToMd(meta, steps), 'utf-8');
+      fs.writeFileSync(path.join(newDir, 'metadata.json'), JSON.stringify(meta, null, 2), 'utf-8');
+      this.out.appendLine(`[Sync] MD: ${meta.title} → ${dirName}`);
     } catch (e: any) {
       this.out.appendLine(`[Sync] MD export failed ${cascadeId.substring(0, 8)}…: ${e.message}`);
     }

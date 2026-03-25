@@ -114,14 +114,20 @@ class AppState: ObservableObject {
             status = .standby
         }
 
-        conversations = result.conversations
+        // 合并新数据，保留用户的 isSelected 状态
+        let oldSelections = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0.isSelected) })
+        conversations = result.conversations.map { item in
+            var updated = item
+            if let wasSelected = oldSelections[item.id] {
+                updated.isSelected = wasSelected
+            }
+            return updated
+        }
     }
 
     func toggleAll(_ selected: Bool) {
         for i in conversations.indices {
-            if !conversations[i].isInAGIndex {
-                conversations[i].isSelected = selected
-            }
+            conversations[i].isSelected = selected
         }
     }
 
@@ -140,9 +146,11 @@ class AppState: ObservableObject {
         let selectedIds = Set(conversations.filter { $0.isSelected }.map { $0.id })
         let result = await recovery.inject(selectedIds: selectedIds)
 
-        recoveryMessage = result.success
-            ? "✅ 已恢复 \(result.count) 个对话"
-            : "❌ 恢复失败: \(result.error)"
+        if result.success {
+            recoveryMessage = "✅ 已恢复 \(result.count) 个对话\n\(result.details)"
+        } else {
+            recoveryMessage = "❌ 恢复失败: \(result.error)\n\(result.details)"
+        }
         isRecovering = false
 
         // 刷新状态

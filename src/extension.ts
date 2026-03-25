@@ -30,8 +30,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('agRecover.forceSync', async () => {
       outputChannel.appendLine('[CMD] Force sync');
-      await syncEngine.fullSync(true);
-      treeProvider.refresh();
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'AG Recover: 强制同步中...',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ message: '正在扫描文件...' });
+          const before = Date.now();
+          await syncEngine.fullSync(true);
+          treeProvider.refresh();
+          const elapsed = ((Date.now() - before) / 1000).toFixed(1);
+          const msg = `同步完成 (${elapsed}s)`;
+          outputChannel.appendLine(`[CMD] ${msg}`);
+          vscode.window.showInformationMessage(`AG Recover: ${msg}`);
+        }
+      );
     }),
 
     vscode.commands.registerCommand('agRecover.restore', async () => {

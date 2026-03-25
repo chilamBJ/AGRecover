@@ -322,19 +322,13 @@ struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // 勾选状态
-            if item.isInAGIndex {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green.opacity(0.6))
+            // 所有对话都可勾选
+            Button { onToggle(item.id) } label: {
+                Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(item.isSelected ? .blue : Color.gray.opacity(0.3))
                     .font(.system(size: 14))
-            } else {
-                Button { onToggle(item.id) } label: {
-                    Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(item.isSelected ? .blue : Color.gray.opacity(0.3))
-                        .font(.system(size: 14))
-                }
-                .buttonStyle(.plain)
             }
+            .buttonStyle(.plain)
 
             // 标题 + 时间
             VStack(alignment: .leading, spacing: 2) {
@@ -372,7 +366,7 @@ struct ConversationRow: View {
     }
 
     private var rowBackground: Color {
-        if item.isSelected && !item.isInAGIndex {
+        if item.isSelected {
             return .blue.opacity(0.06)
         }
         return .clear
